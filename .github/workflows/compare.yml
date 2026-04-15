@@ -1,0 +1,51 @@
+name: Compare and Extract Modified Files
+
+on:
+  workflow_dispatch:
+    inputs:
+      official_image:
+        description: '官方镜像 (例如 emby/embyserver:4.10.0.2)'
+        required: true
+        default: 'emby/embyserver:4.10.0.2'
+      cracked_image:
+        description: '破解镜像 (例如 amilys/embyserver:beta)'
+        required: true
+        default: 'amilys/embyserver:beta'
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install container-diff
+        run: |
+          curl -LO https://github.com/GoogleContainerTools/container-diff/releases/download/v0.17.0/container-diff-linux-amd64
+          chmod +x container-diff-linux-amd64
+          sudo mv container-diff-linux-amd64 /usr/local/bin/container-diff
+
+      - name: Pull images
+        run: |
+          docker pull ${{ github.event.inputs.official_image }}
+          docker pull ${{ github.event.inputs.cracked_image }}
+
+      - name: Generate file diff
+        run: |
+          container-diff diff ${{ github.event.inputs.official_image }} ${{ github.event.inputs.cracked_image }} --type=file > file-diff.txt
+          cat file-diff.txt
+
+      - name: Extract modified files from cracked image
+        run: |
+          mkdir extracted
+          bash scripts/extract-changes.sh \
+            ${{ github.event.inputs.cracked_image }} \
+            file-diff.txt \
+            extracted
+
+      - name: Upload extracted files as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: modified-files
+          path: extracted/
+          retention-days: 7
