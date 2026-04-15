@@ -19,22 +19,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install container-diff
+      - name: Install container-diff and jq
         run: |
           curl -LO https://github.com/GoogleContainerTools/container-diff/releases/download/v0.17.0/container-diff-linux-amd64
           chmod +x container-diff-linux-amd64
           sudo mv container-diff-linux-amd64 /usr/local/bin/container-diff
+          sudo apt-get update && sudo apt-get install -y jq
 
       - name: Pull images
         run: |
           docker pull ${{ github.event.inputs.official_image }}
           docker pull ${{ github.event.inputs.cracked_image }}
 
-      - name: Generate file diff
+      - name: Generate JSON diff
         run: |
-          container-diff diff ${{ github.event.inputs.official_image }} ${{ github.event.inputs.cracked_image }} --type=file > file-diff.txt
-          echo "=== Full content of file-diff.txt ==="
-          cat file-diff.txt
+          container-diff diff ${{ github.event.inputs.official_image }} ${{ github.event.inputs.cracked_image }} --type=file -o json > diff.json
+          echo "=== JSON diff content ==="
+          cat diff.json
           echo "=== End of diff ==="
 
       - name: Extract modified files from cracked image
@@ -42,10 +43,10 @@ jobs:
           mkdir -p extracted
           bash scripts/extract-changes.sh \
             "${{ github.event.inputs.cracked_image }}" \
-            file-diff.txt \
+            diff.json \
             extracted
 
-      - name: List extracted files (if any)
+      - name: List extracted files
         run: |
           if [ -d extracted ] && [ -n "$(ls -A extracted)" ]; then
             echo "Extracted files:"
@@ -54,7 +55,7 @@ jobs:
             echo "No files extracted."
           fi
 
-      - name: Upload extracted files as artifact
+      - name: Upload extracted files
         uses: actions/upload-artifact@v4
         with:
           name: modified-files
