@@ -19,41 +19,47 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install container-diff and jq
-        run: |
-          curl -LO https://github.com/GoogleContainerTools/container-diff/releases/download/v0.17.0/container-diff-linux-amd64
-          chmod +x container-diff-linux-amd64
-          sudo mv container-diff-linux-amd64 /usr/local/bin/container-diff
-          sudo apt-get update && sudo apt-get install -y jq
-
       - name: Pull images
         run: |
           docker pull ${{ github.event.inputs.official_image }}
           docker pull ${{ github.event.inputs.cracked_image }}
 
-      - name: Generate JSON diff
+      - name: Create containers and export filesystems
         run: |
-          container-diff diff ${{ github.event.inputs.official_image }} ${{ github.event.inputs.cracked_image }} --type=file -o json > diff.json
-          echo "=== JSON diff content ==="
-          cat diff.json
-          echo "=== End of diff ==="
+          # 创建临时容器
+          docker create --name official ${{ github.event.inputs.official_image }}
+          docker create --name cracked ${{ github.event.inputs.cracked_image }}
+          # 导出文件系统
+          mkdir -p official_fs cracked_fs
+          docker export official | tar -C official_fs -xf -
+          docker export cracked | tar -C cracked_fs -xf -
+          # 清理容器
+          docker rm official cracked
 
-      - name: Extract modified files from cracked image
+      - name: Find modified files
+        run: |
+          # 递归对比，只列出不同的文件（排除 dev, proc, sys 等无关目录）
+          diff -rq official_fs cracked_fs 2>/dev/null | grep -E '^Only in cracked_fs|^Files .* differ' > diff.txt
+          echo "=== diff.txt ==="
+          cat diff.txt
+          # 提取 cracked_fs 中新增或修改的文件路径（去掉前缀 cracked_fs/）
+          grep -E '^Only in cracked_fs|^Files .* differ' diff.txt | \
+            sed -E 's/^Only in cracked_fs(.*): /cracked_fs\1\//; s/^Files cracked_fs(.*) and official_fs.*/cracked_fs\1/' | \
+            sed 's/^cracked_fs//' | sort -u > file-list.txt
+          echo "=== file-list.txt ==="
+          cat file-list.txt
+
+      - name: Extract modified files
         run: |
           mkdir -p extracted
-          bash scripts/extract-changes.sh \
-            "${{ github.event.inputs.cracked_image }}" \
-            diff.json \
-            extracted
-
-      - name: List extracted files
-        run: |
-          if [ -d extracted ] && [ -n "$(ls -A extracted)" ]; then
-            echo "Extracted files:"
-            find extracted -type f
-          else
-            echo "No files extracted."
-          fi
+          while IFS= read -r file; do
+            if [ -n "$file" ] && [ -f "cracked_fs/$file" ]; then
+              mkdir -p "extracted/$(dirname "$file")"
+              cp "cracked_fs/$file" "extracted/$file"
+              echo "Extracted: $file"
+            fi
+          done < file-list.txt
+          echo "Total extracted files: $(find extracted -type f | wc -l)"
 
       - name: Upload extracted files
         uses: actions/upload-artifact@v4
