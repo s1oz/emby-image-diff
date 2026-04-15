@@ -33,9 +33,9 @@ jobs:
       - name: Generate file diff
         run: |
           container-diff diff ${{ github.event.inputs.official_image }} ${{ github.event.inputs.cracked_image }} --type=file > file-diff.txt
-          echo "=== DIFF OUTPUT START ==="
+          echo "=== Full content of file-diff.txt ==="
           cat file-diff.txt
-          echo "=== DIFF OUTPUT END ==="
+          echo "=== End of diff ==="
 
       - name: Extract modified files from cracked image
         run: |
@@ -45,10 +45,14 @@ jobs:
             file-diff.txt \
             extracted
 
-      - name: List extracted files (debug)
+      - name: List extracted files (if any)
         run: |
-          echo "Extracted files:"
-          find extracted -type f | head -50 || echo "No files found"
+          if [ -d extracted ] && [ -n "$(ls -A extracted)" ]; then
+            echo "Extracted files:"
+            find extracted -type f
+          else
+            echo "No files extracted."
+          fi
 
       - name: Upload extracted files as artifact
         uses: actions/upload-artifact@v4
@@ -56,4 +60,3 @@ jobs:
           name: modified-files
           path: extracted/
           retention-days: 7
-          if-no-files-found: warn
